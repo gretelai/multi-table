@@ -1,0 +1,3 @@
+SQLAlchemy==1.4.22
+Faker==4.1.1
+gretel-client

@@ -4,7 +4,14 @@ This code is designed to run transforms or synthetics directly on a relational d
 
 # Get Started
 
+Install, preferebly into a virtual environment
+
+```
+pip install -U .
+```
+
 ## Running the notebooks
+
 1. Launch either the transform or synthetics notebook
 2. Update your database connection string
 3. If running transforms, update the location of your policy files

@@ -128,8 +128,9 @@ def transform_tables(rdb_config:dict, project, transform_policies:dict):
 
     if status != 'error':
         print("\nModel training and initial generation all complete!")
-    
-    return transformed_tables
+        return transformed_tables, False
+    else:
+        return transformed_tables, True
 
 
 def transform_keys(transformed_tables:dict, rdb_config:dict):

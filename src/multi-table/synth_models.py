@@ -1,3 +1,4 @@
+import random
 import pandas as pd
 
 from gretel_client import projects
@@ -68,7 +69,7 @@ def prepare_training_data(rdb_config:dict):
     return training_data
 
         
-def synthesize_tables(rdb_config:dict, project, synth_record_size_ratio:float, training_configs:dict):
+def synthesize_tables(rdb_config:dict, project, training_configs:dict):
 
     # model_progress will hold the status of each model during training and generation
     model_progress = {}
@@ -81,7 +82,7 @@ def synthesize_tables(rdb_config:dict, project, synth_record_size_ratio:float, t
     for table in rdb_config["table_data"]:
         df = rdb_config["table_data"][table]
         train_size = len(df)
-        synth_size = train_size * synth_record_size_ratio
+        synth_size = train_size * rdb_config["synth_record_size_ratio"]
         synth_record_counts[table] = synth_size
             
     # Prepare training data
@@ -170,33 +171,33 @@ def synthesize_tables(rdb_config:dict, project, synth_record_size_ratio:float, t
  
     if no_errors:
         print("\nModel training and initial generation all complete!")
-        
-    return synthetic_tables, synth_record_counts, model_progress
+        return synthetic_tables, False, model_progress
+    else:
+        return synthetic_tables, True, model_progress
 
 
-def synthesize_keys(synthetic_tables:dict, rdb_config:dict, synth_record_counts:dict):
+def synthesize_keys(synthetic_tables:dict, rdb_config:dict,):
     
+    # Reompute the number of records needed for each table
+    
+    synth_record_counts = {}
+    for table in synthetic_tables:
+        df = synthetic_tables[table]
+        synth_record_counts[table] = len(df)
+                
     # Synthesize primary keys by assigning a new unique int
     
     synth_primary_keys = {}
-    for table in rdb_config["table_data"]:
+    for table in rdb_config["primary_keys"]:
+        key = rdb_config["primary_keys"][table]
+        df = synthetic_tables[table]
         synth_size = synth_record_counts[table]
         new_key = [i for i in range(synth_size)]
         synth_primary_keys[table] = new_key
-    
-    for table in rdb_config["primary_keys"]:
-        field = rdb_config["primary_keys"][table]
-        df = synthetic_tables[table]
-        key = synth_primary_keys[table]
-        # Sanity check the new synthetic df and the primary key match up in size
-        table_len = len(df)
-        key_use = key[0:table_len]
-        df[field] = key_use
+        df[key] = new_key  
         synthetic_tables[table] = df
         
-    # Synthesize foreign keys
-    
-    import random
+    # Synthesize foreign keys   
 
     synth_foreign_keys = {}
     for table in rdb_config["table_data"]:

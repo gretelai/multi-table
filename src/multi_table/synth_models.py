@@ -68,8 +68,75 @@ def prepare_training_data(rdb_config:dict):
         
     return training_data
 
+def synthesize_keys(synthetic_tables:dict, rdb_config:dict,):
+    
+    # Reompute the number of records needed for each table
+    
+    synth_record_counts = {}
+    for table in synthetic_tables:
+        df = synthetic_tables[table]
+        synth_record_counts[table] = len(df)
+                
+    # Synthesize primary keys by assigning a new unique int
+    
+    synth_primary_keys = {}
+    for table in rdb_config["primary_keys"]:
+        key = rdb_config["primary_keys"][table]
+        df = synthetic_tables[table]
+        synth_size = synth_record_counts[table]
+        new_key = [i for i in range(synth_size)]
+        synth_primary_keys[table] = new_key
+        df[key] = new_key  
+        synthetic_tables[table] = df
         
-def synthesize_tables(rdb_config:dict, project, training_configs:dict):
+    # Synthesize foreign keys   
+
+    synth_foreign_keys = {}
+    for table in rdb_config["table_data"]:
+        synth_foreign_keys[table] = {}
+
+    for key_set in rdb_config["relationships"]:
+        # The first table/field pair is the primary key
+        first = True
+        for table_field_pair in key_set:
+            table, field = table_field_pair
+            if first:
+                primary_key_values = synth_primary_keys[table]
+                first = False
+            else:
+                # Find the average number of records with the same foreign key value 
+                synth_size = synth_record_counts[table]
+                avg_cnt_key = int(synth_size / len(primary_key_values))
+                key_values = []
+                key_cnt = 0
+                # Now recreate the foreign key values using the primary key values while
+                # preserving the avg number of records with the same foreign key value
+                for i in range(len(primary_key_values)):
+                    for j in range(avg_cnt_key):
+                        key_values.append(i)
+                        key_cnt += 1
+                i = 0
+                while key_cnt < synth_size:
+                    key_values.append(i)
+                    key_cnt += 1
+                    i += 1
+                random.shuffle(key_values)
+                synth_foreign_keys[table][field] = key_values
+            
+    for table in synth_foreign_keys:
+        df = synthetic_tables[table]
+        table_len = len(df)
+        for field in synth_foreign_keys[table]:
+            key = synth_foreign_keys[table][field]
+            # Sanity check the new synthetic df and the foreign key match up in size
+            key_use = key[0:table_len]
+            df[field] = key_use
+        synthetic_tables[table] = df
+        
+    return synthetic_tables
+
+      
+def synthesize_rdb(rdb_config:dict, project, training_configs:dict):
 
     # model_progress will hold the status of each model during training and generation
     model_progress = {}
@@ -169,76 +236,10 @@ def synthesize_tables(rdb_config:dict, project, training_configs:dict):
                 model_progress[table]["model_status"] = status
                 no_errors = False
  
+    # Now transfrom the primary and foreign keys
+    
     if no_errors:
         print("\nModel training and initial generation all complete!")
-        return synthetic_tables, False, model_progress
-    else:
-        return synthetic_tables, True, model_progress
+        synthetic_tables = synthesize_keys(synthetic_tables, rdb_config)
 
-
-def synthesize_keys(synthetic_tables:dict, rdb_config:dict,):
-    
-    # Reompute the number of records needed for each table
-    
-    synth_record_counts = {}
-    for table in synthetic_tables:
-        df = synthetic_tables[table]
-        synth_record_counts[table] = len(df)
-                
-    # Synthesize primary keys by assigning a new unique int
-    
-    synth_primary_keys = {}
-    for table in rdb_config["primary_keys"]:
-        key = rdb_config["primary_keys"][table]
-        df = synthetic_tables[table]
-        synth_size = synth_record_counts[table]
-        new_key = [i for i in range(synth_size)]
-        synth_primary_keys[table] = new_key
-        df[key] = new_key  
-        synthetic_tables[table] = df
-        
-    # Synthesize foreign keys   
-
-    synth_foreign_keys = {}
-    for table in rdb_config["table_data"]:
-        synth_foreign_keys[table] = {}
-
-    for key_set in rdb_config["relationships"]:
-        # The first table/field pair is the primary key
-        first = True
-        for table_field_pair in key_set:
-            table, field = table_field_pair
-            if first:
-                primary_key_values = synth_primary_keys[table]
-                first = False
-            else:
-                # Find the average number of records with the same foreign key value 
-                synth_size = synth_record_counts[table]
-                avg_cnt_key = int(synth_size / len(primary_key_values))
-                key_values = []
-                key_cnt = 0
-                # Now recreate the foreign key values using the primary key values while
-                # preserving the avg number of records with the same foreign key value
-                for i in range(len(primary_key_values)):
-                    for j in range(avg_cnt_key):
-                        key_values.append(i)
-                        key_cnt += 1
-                i = 0
-                while key_cnt < synth_size:
-                    key_values.append(i)
-                    key_cnt += 1
-                    i += 1
-                random.shuffle(key_values)
-                synth_foreign_keys[table][field] = key_values
-            
-    for table in synth_foreign_keys:
-        df = synthetic_tables[table]
-        table_len = len(df)
-        for field in synth_foreign_keys[table]:
-            key = synth_foreign_keys[table][field]
-            # Sanity check the new synthetic df and the foreign key match up in size
-            key_use = key[0:table_len]
-            df[field] = key_use
-        synthetic_tables[table] = df
-        
-    return synthetic_tables
+    return synthetic_tables, model_progress

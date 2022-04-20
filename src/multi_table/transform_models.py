@@ -47,9 +47,49 @@ def generate_data(rdb_config:dict, table:str, model):
     print("Generation started for " + table)
     
     return record_handler    
- 
+
+def transform_keys(transformed_tables:dict, rdb_config:dict):
     
-def transform_tables(rdb_config:dict, project, transform_policies:dict):
+    primary_keys_processed = []
+    
+    # First process the primary/foreign key relationships
+    
+    for key_set in rdb_config["relationships"]:
+    
+        # Get array of unique values from each table, can use dfs in transformed_tables   
+        first = True
+        field_values = set()
+        for table_field_pair in key_set:
+            table, field = table_field_pair
+            # The first pair is a primary key
+            if first:
+                primary_keys_processed.append(table)
+                first = False
+            field_values = field_values.union(set(rdb_config["table_data"][table][field]))
+        
+        # Train a label encoder
+        field_values_list = list(set(field_values))
+        le = preprocessing.LabelEncoder()
+        le.fit(field_values_list)
+    
+        # Run the label encoder on dfs in transformed_tables
+        for table_field_pair in key_set:
+            table, field = table_field_pair
+            transformed_tables[table][field] = le.transform(rdb_config["table_data"][table][field]) 
+
+    # Process the remaining primary keys
+
+    for table in rdb_config["primary_keys"]:
+        if table not in primary_keys_processed:
+            le = preprocessing.LabelEncoder()
+            key_field = rdb_config["primary_keys"][table]
+            le.fit(rdb_config["table_data"][table][key_field])
+            transformed_tables[table][key_field] = le.transform(rdb_config["table_data"][table][key_field]) 
+            
+    return transformed_tables
+
+    
+def transform_rdb(rdb_config:dict, project, transform_policies:dict):
 
     # model_progress will hold the status of each model during training and generation
     model_progress = {}
@@ -126,51 +166,11 @@ def transform_tables(rdb_config:dict, project, transform_policies:dict):
                 model_progress[table]["model_status"] = status
                 more_to_do = False
 
+    # Now transform the primary and foreign keys
+    
     if status != 'error':
         print("\nModel training and initial generation all complete!")
-        return transformed_tables, False
-    else:
-        return transformed_tables, True
+        transformed_tables = transform_keys(transformed_tables, rdb_config)
 
-
-def transform_keys(transformed_tables:dict, rdb_config:dict):
-    
-    primary_keys_processed = []
-    
-    # First process the primary/foreign key relationships
-    
-    for key_set in rdb_config["relationships"]:
-    
-        # Get array of unique values from each table, can use dfs in transformed_tables   
-        first = True
-        field_values = set()
-        for table_field_pair in key_set:
-            table, field = table_field_pair
-            # The first pair is a primary key
-            if first:
-                primary_keys_processed.append(table)
-                first = False
-            field_values = field_values.union(set(rdb_config["table_data"][table][field]))
-        
-        # Train a label encoder
-        field_values_list = list(set(field_values))
-        le = preprocessing.LabelEncoder()
-        le.fit(field_values_list)
-    
-        # Run the label encoder on dfs in transformed_tables
-        for table_field_pair in key_set:
-            table, field = table_field_pair
-            transformed_tables[table][field] = le.transform(rdb_config["table_data"][table][field]) 
-
-    # Process the remaining primary keys
-
-    for table in rdb_config["primary_keys"]:
-        if table not in primary_keys_processed:
-            le = preprocessing.LabelEncoder()
-            key_field = rdb_config["primary_keys"][table]
-            le.fit(rdb_config["table_data"][table][key_field])
-            transformed_tables[table][key_field] = le.transform(rdb_config["table_data"][table][key_field]) 
-            
     return transformed_tables
-
-            
+           

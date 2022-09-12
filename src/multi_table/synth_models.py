@@ -54,8 +54,8 @@ def prepare_training_data(rdb_config:dict):
     
     for table in rdb_config["primary_keys"]:
         if table not in primary_keys_processed:
-            key_field = primary_keys[table]
-            table_fields_use[table].remove(field)
+            key_field = rdb_config["primary_keys"][table]
+            table_fields_use[table].remove(key_field)
  
     # Remove the key fields from the training data
     

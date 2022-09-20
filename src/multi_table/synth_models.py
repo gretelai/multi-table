@@ -149,7 +149,10 @@ def synthesize_rdb(rdb_config:dict, project, training_configs:dict):
     for table in rdb_config["table_data"]:
         df = rdb_config["table_data"][table]
         train_size = len(df)
-        synth_size = train_size * rdb_config["synth_record_size_ratio"]
+        if table in rdb_config["tables_to_not_synthesize"]:
+            synth_size = train_size
+        else:
+            synth_size = train_size * rdb_config["synth_record_size_ratio"]
         synth_record_counts[table] = synth_size
             
     # Prepare training data
@@ -160,8 +163,9 @@ def synthesize_rdb(rdb_config:dict, project, training_configs:dict):
 
     # Submit all models
     for table in rdb_config["table_files"]:
-        model = create_model(table, project, training_configs, training_data)
-        model_progress[table] = {
+        if table not in rdb_config["tables_to_not_synthesize"]:
+            model = create_model(table, project, training_configs, training_data)
+            model_progress[table] = {
                          "model": model,
                          "model_status": "pending",
                          "record_handler": "",
@@ -235,7 +239,14 @@ def synthesize_rdb(rdb_config:dict, project, training_configs:dict):
                 print("\nTraining for " + table + " ended in error")
                 model_progress[table]["model_status"] = status
                 no_errors = False
- 
+                
+    # If table is in the list of those to not synthesize, move the train df to synth df list
+    
+    for table in rdb_config["tables_to_not_synthesize"]:
+        filename = training_data[table]
+        df = pd.read_csv(filename)
+        synthetic_tables[table] = df
+        
     # Now transfrom the primary and foreign keys
     
     if no_errors:

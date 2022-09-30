@@ -88,9 +88,6 @@ def synthesize_tables(rdb_config:dict, project, training_configs:dict):
     # Prepare training data
     training_data = prepare_training_data(rdb_config)
 
-    # Create a new project
-    project = create_project(display_name="rdb_synthetics6")
-
     # Submit all models
     for table in rdb_config["table_files"]:
         model = create_model(table, project, training_configs, training_data)
@@ -121,17 +118,10 @@ def synthesize_tables(rdb_config:dict, project, training_configs:dict):
                 if status == 'completed':
                     report = model.peek_report()
                     sqs = report['synthetic_data_quality_score']['score']
-                    print_string = "Training completed for " + table + " with SQS score " + str(sqs)
-                    if sqs >= 80:
-                        print(print_string + " (Excellent)")
-                    elif sqs >= 60:
-                        print(print_string + " (Good)")
-                    elif sqs >= 40:
-                        print(print_string + " (Moderate)")
-                    elif sqs >= 20:
-                        print(print_string + " (Poor)")
-                    else:
-                        print(print_string + " (Very Poor)")
+                    grade = report['synthetic_data_quality_score']['grade']
+                    print_string = "Training completed for " + table + " with SQS score " + str(sqs) + "(" + grade + ")"
+                    print(print_string)
+                    
                     rh = generate_data(table, model, training_data, synth_record_counts)
                     model_progress[table]["record_handler"] = rh
                     model_progress[table]["record_handler_status"] = "pending"
@@ -204,13 +194,11 @@ def synthesize_keys(synthetic_tables:dict, rdb_config:dict,):
         synth_foreign_keys[table] = {}
 
     for key_set in rdb_config["relationships"]:
-        # The first table/field pair is the primary key
-        first = True
         for table_field_pair in key_set:
             table, field = table_field_pair
-            if first:
+            # Check if table/field pair is the primary key
+            if field==rdb_config["primary_keys"][table]:
                 primary_key_values = synth_primary_keys[table]
-                first = False
             else:
                 # Find the average number of records with the same foreign key value 
                 synth_size = synth_record_counts[table]

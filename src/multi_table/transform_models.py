@@ -142,14 +142,12 @@ def transform_keys(transformed_tables:dict, rdb_config:dict):
     for key_set in rdb_config["relationships"]:
     
         # Get array of unique values from each table, can use dfs in transformed_tables   
-        first = True
         field_values = set()
         for table_field_pair in key_set:
             table, field = table_field_pair
-            # The first pair is a primary key
-            if first:
+            # Check if table/field pair is the primary key
+            if field==rdb_config["primary_keys"][table]:
                 primary_keys_processed.append(table)
-                first = False
             field_values = field_values.union(set(rdb_config["table_data"][table][field]))
         
         # Train a label encoder

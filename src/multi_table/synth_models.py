@@ -43,10 +43,9 @@ def prepare_training_data(rdb_config:dict):
     
     primary_keys_processed = []
     for key_set in rdb_config["relationships"]:
-        first = True
         for table_field_pair in key_set:
             table, field = table_field_pair
-            if first:
+            if field==rdb_config["primary_keys"][table]:
                 primary_keys_processed.append(table)
             table_fields_use[table].remove(field)
         

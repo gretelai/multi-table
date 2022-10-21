@@ -104,17 +104,36 @@ def synthesize_keys(synthetic_tables:dict, rdb_config:dict,):
                 primary_key_values = synth_primary_keys[table]
                 first = False
             else:
-                # Find the average number of records with the same foreign key value 
+                                             
+                # Now recreate the foreign key values using the primary key values while
+                # preserving the number of records with the same foreign key value
+                # Primary key values range from 0 to size of table holding primary key
+                
+                # Get the frequency distribution of this foreign key
+                table_df = rdb_config["table_data"][table]
+                freqs = table_df.groupby([field]).size().reset_index()
+                
                 synth_size = synth_record_counts[table]
-                avg_cnt_key = int(synth_size / len(primary_key_values))
                 key_values = []
                 key_cnt = 0
-                # Now recreate the foreign key values using the primary key values while
-                # preserving the avg number of records with the same foreign key value
+                
+                # Process one primary key at a time. Keep an index on the foreign key freq values
+                # and repeat the primary key as a foreign key for the next freq value.  If we're
+                # increasing the size of the tables, we'll have to loop through the foreign key
+                # values multiple times
+                
+                next_freq_index = 0
                 for i in range(len(primary_key_values)):
-                    for j in range(avg_cnt_key):
+                    if next_freq_index == len(freqs):
+                        next_freq_index = 0
+                    freq = freqs.loc[next_freq_index][0]
+                    for j in range(freq):
                         key_values.append(i)
-                        key_cnt += 1
+                        key_cnt += 1   
+                    next_freq_index += 1
+
+                # Make sure we have reached the desired size of the foreign key table
+                # If not, loop back through the primary keys filling it in.
                 i = 0
                 while key_cnt < synth_size:
                     key_values.append(i)

@@ -43,9 +43,10 @@ def prepare_training_data(rdb_config:dict):
     
     primary_keys_processed = []
     for key_set in rdb_config["relationships"]:
+        first = True
         for table_field_pair in key_set:
             table, field = table_field_pair
-            if field==rdb_config["primary_keys"][table]:
+            if first:
                 primary_keys_processed.append(table)
             table_fields_use[table].remove(field)
         
@@ -53,8 +54,8 @@ def prepare_training_data(rdb_config:dict):
     
     for table in rdb_config["primary_keys"]:
         if table not in primary_keys_processed:
-            key_field = rdb_config["primary_keys"][table]
-            table_fields_use[table].remove(key_field)
+            key_field = primary_keys[table]
+            table_fields_use[table].remove(field)
  
     # Remove the key fields from the training data
     
@@ -67,8 +68,94 @@ def prepare_training_data(rdb_config:dict):
         
     return training_data
 
+def synthesize_keys(synthetic_tables:dict, rdb_config:dict,):
+    
+    # Reompute the number of records needed for each table
+    
+    synth_record_counts = {}
+    for table in synthetic_tables:
+        df = synthetic_tables[table]
+        synth_record_counts[table] = len(df)
+                
+    # Synthesize primary keys by assigning a new unique int
+    
+    synth_primary_keys = {}
+    for table in rdb_config["primary_keys"]:
+        key = rdb_config["primary_keys"][table]
+        df = synthetic_tables[table]
+        synth_size = synth_record_counts[table]
+        new_key = [i for i in range(synth_size)]
+        synth_primary_keys[table] = new_key
+        df[key] = new_key  
+        synthetic_tables[table] = df
         
-def synthesize_tables(rdb_config:dict, project, training_configs:dict):
+    # Synthesize foreign keys   
+
+    synth_foreign_keys = {}
+    for table in rdb_config["table_data"]:
+        synth_foreign_keys[table] = {}
+
+    for key_set in rdb_config["relationships"]:
+        # The first table/field pair is the primary key
+        first = True
+        for table_field_pair in key_set:
+            table, field = table_field_pair
+            if first:
+                primary_key_values = synth_primary_keys[table]
+                first = False
+            else:
+                                             
+                # Now recreate the foreign key values using the primary key values while
+                # preserving the number of records with the same foreign key value
+                # Primary key values range from 0 to size of table holding primary key
+                
+                # Get the frequency distribution of this foreign key
+                table_df = rdb_config["table_data"][table]
+                freqs = table_df.groupby([field]).size().reset_index()
+                
+                synth_size = synth_record_counts[table]
+                key_values = []
+                key_cnt = 0
+                
+                # Process one primary key at a time. Keep an index on the foreign key freq values
+                # and repeat the primary key as a foreign key for the next freq value.  If we're
+                # increasing the size of the tables, we'll have to loop through the foreign key
+                # values multiple times
+                
+                next_freq_index = 0
+                for i in range(len(primary_key_values)):
+                    if next_freq_index == len(freqs):
+                        next_freq_index = 0
+                    freq = freqs.loc[next_freq_index][0]
+                    for j in range(freq):
+                        key_values.append(i)
+                        key_cnt += 1   
+                    next_freq_index += 1
+
+                # Make sure we have reached the desired size of the foreign key table
+                # If not, loop back through the primary keys filling it in.
+                i = 0
+                while key_cnt < synth_size:
+                    key_values.append(i)
+                    key_cnt += 1
+                    i += 1
+                random.shuffle(key_values)
+                synth_foreign_keys[table][field] = key_values
+            
+    for table in synth_foreign_keys:
+        df = synthetic_tables[table]
+        table_len = len(df)
+        for field in synth_foreign_keys[table]:
+            key = synth_foreign_keys[table][field]
+            # Sanity check the new synthetic df and the foreign key match up in size
+            key_use = key[0:table_len]
+            df[field] = key_use
+        synthetic_tables[table] = df
+        
+    return synthetic_tables
+
+      
+def synthesize_rdb(rdb_config:dict, project, training_configs:dict):
 
     # model_progress will hold the status of each model during training and generation
     model_progress = {}
@@ -81,16 +168,23 @@ def synthesize_tables(rdb_config:dict, project, training_configs:dict):
     for table in rdb_config["table_data"]:
         df = rdb_config["table_data"][table]
         train_size = len(df)
-        synth_size = train_size * rdb_config["synth_record_size_ratio"]
+        if table in rdb_config["tables_to_not_synthesize"]:
+            synth_size = train_size
+        else:
+            synth_size = train_size * rdb_config["synth_record_size_ratio"]
         synth_record_counts[table] = synth_size
             
     # Prepare training data
     training_data = prepare_training_data(rdb_config)
 
+    # Create a new project
+    project = create_project(display_name="rdb_synthetics6")
+
     # Submit all models
     for table in rdb_config["table_files"]:
-        model = create_model(table, project, training_configs, training_data)
-        model_progress[table] = {
+        if table not in rdb_config["tables_to_not_synthesize"]:
+            model = create_model(table, project, training_configs, training_data)
+            model_progress[table] = {
                          "model": model,
                          "model_status": "pending",
                          "record_handler": "",
@@ -117,10 +211,17 @@ def synthesize_tables(rdb_config:dict, project, training_configs:dict):
                 if status == 'completed':
                     report = model.peek_report()
                     sqs = report['synthetic_data_quality_score']['score']
-                    grade = report['synthetic_data_quality_score']['grade']
-                    print_string = "Training completed for " + table + " with SQS score " + str(sqs) + "(" + grade + ")"
-                    print(print_string)
-                    
+                    print_string = "Training completed for " + table + " with SQS score " + str(sqs)
+                    if sqs >= 80:
+                        print(print_string + " (Excellent)")
+                    elif sqs >= 60:
+                        print(print_string + " (Good)")
+                    elif sqs >= 40:
+                        print(print_string + " (Moderate)")
+                    elif sqs >= 20:
+                        print(print_string + " (Poor)")
+                    else:
+                        print(print_string + " (Very Poor)")
                     rh = generate_data(table, model, training_data, synth_record_counts)
                     model_progress[table]["record_handler"] = rh
                     model_progress[table]["record_handler_status"] = "pending"
@@ -157,75 +258,18 @@ def synthesize_tables(rdb_config:dict, project, training_configs:dict):
                 print("\nTraining for " + table + " ended in error")
                 model_progress[table]["model_status"] = status
                 no_errors = False
- 
+                
+    # If table is in the list of those to not synthesize, move the train df to synth df list
+    
+    for table in rdb_config["tables_to_not_synthesize"]:
+        filename = training_data[table]
+        df = pd.read_csv(filename)
+        synthetic_tables[table] = df
+        
+    # Now transfrom the primary and foreign keys
+    
     if no_errors:
         print("\nModel training and initial generation all complete!")
-        return synthetic_tables, False, model_progress
-    else:
-        return synthetic_tables, True, model_progress
+        synthetic_tables = synthesize_keys(synthetic_tables, rdb_config)
 
-
-def synthesize_keys(synthetic_tables:dict, rdb_config:dict,):
-    
-    # Reompute the number of records needed for each table
-    
-    synth_record_counts = {}
-    for table in synthetic_tables:
-        df = synthetic_tables[table]
-        synth_record_counts[table] = len(df)
-                
-    # Synthesize primary keys by assigning a new unique int
-    
-    synth_primary_keys = {}
-    for table in rdb_config["primary_keys"]:
-        key = rdb_config["primary_keys"][table]
-        df = synthetic_tables[table]
-        synth_size = synth_record_counts[table]
-        new_key = [i for i in range(synth_size)]
-        synth_primary_keys[table] = new_key
-        df[key] = new_key  
-        synthetic_tables[table] = df
-        
-    # Synthesize foreign keys   
-
-    synth_foreign_keys = {}
-    for table in rdb_config["table_data"]:
-        synth_foreign_keys[table] = {}
-
-    for key_set in rdb_config["relationships"]:
-        for table_field_pair in key_set:
-            table, field = table_field_pair
-            # Check if table/field pair is the primary key
-            if field==rdb_config["primary_keys"][table]:
-                primary_key_values = synth_primary_keys[table]
-            else:
-                # Find the average number of records with the same foreign key value 
-                synth_size = synth_record_counts[table]
-                avg_cnt_key = int(synth_size / len(primary_key_values))
-                key_values = []
-                key_cnt = 0
-                # Now recreate the foreign key values using the primary key values while
-                # preserving the avg number of records with the same foreign key value
-                for i in range(len(primary_key_values)):
-                    for j in range(avg_cnt_key):
-                        key_values.append(i)
-                        key_cnt += 1
-                i = 0
-                while key_cnt < synth_size:
-                    key_values.append(i)
-                    key_cnt += 1
-                    i += 1
-                random.shuffle(key_values)
-                synth_foreign_keys[table][field] = key_values
-            
-    for table in synth_foreign_keys:
-        df = synthetic_tables[table]
-        table_len = len(df)
-        for field in synth_foreign_keys[table]:
-            key = synth_foreign_keys[table][field]
-            # Sanity check the new synthetic df and the foreign key match up in size
-            key_use = key[0:table_len]
-            df[field] = key_use
-        synthetic_tables[table] = df
-        
-    return synthetic_tables
+    return synthetic_tables, model_progress

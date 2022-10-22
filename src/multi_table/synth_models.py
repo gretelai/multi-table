@@ -43,10 +43,9 @@ def prepare_training_data(rdb_config:dict):
     
     primary_keys_processed = []
     for key_set in rdb_config["relationships"]:
-        first = True
         for table_field_pair in key_set:
             table, field = table_field_pair
-            if first:
+            if field==rdb_config["primary_keys"][table]:
                 primary_keys_processed.append(table)
             table_fields_use[table].remove(field)
         
@@ -54,8 +53,8 @@ def prepare_training_data(rdb_config:dict):
     
     for table in rdb_config["primary_keys"]:
         if table not in primary_keys_processed:
-            key_field = primary_keys[table]
-            table_fields_use[table].remove(field)
+            key_field = rdb_config["primary_keys"][table]
+            table_fields_use[table].remove(key_field)
  
     # Remove the key fields from the training data
     
@@ -70,7 +69,7 @@ def prepare_training_data(rdb_config:dict):
 
 def synthesize_keys(synthetic_tables:dict, rdb_config:dict,):
     
-    # Reompute the number of records needed for each table
+    # Recompute the number of records needed for each table
     
     synth_record_counts = {}
     for table in synthetic_tables:
@@ -97,12 +96,10 @@ def synthesize_keys(synthetic_tables:dict, rdb_config:dict,):
 
     for key_set in rdb_config["relationships"]:
         # The first table/field pair is the primary key
-        first = True
         for table_field_pair in key_set:
             table, field = table_field_pair
-            if first:
+            if field==rdb_config["primary_keys"][table]:
                 primary_key_values = synth_primary_keys[table]
-                first = False
             else:
                                              
                 # Now recreate the foreign key values using the primary key values while
@@ -177,9 +174,6 @@ def synthesize_rdb(rdb_config:dict, project, training_configs:dict):
     # Prepare training data
     training_data = prepare_training_data(rdb_config)
 
-    # Create a new project
-    project = create_project(display_name="rdb_synthetics6")
-
     # Submit all models
     for table in rdb_config["table_files"]:
         if table not in rdb_config["tables_to_not_synthesize"]:
@@ -210,18 +204,12 @@ def synthesize_rdb(rdb_config:dict, project, training_configs:dict):
                 # If status is now complete, submit the generation job
                 if status == 'completed':
                     report = model.peek_report()
-                    sqs = report['synthetic_data_quality_score']['score']
-                    print_string = "Training completed for " + table + " with SQS score " + str(sqs)
-                    if sqs >= 80:
-                        print(print_string + " (Excellent)")
-                    elif sqs >= 60:
-                        print(print_string + " (Good)")
-                    elif sqs >= 40:
-                        print(print_string + " (Moderate)")
-                    elif sqs >= 20:
-                        print(print_string + " (Poor)")
-                    else:
-                        print(print_string + " (Very Poor)")
+                    if report != None:
+                        sqs = report['synthetic_data_quality_score']['score']
+                        grade = report['synthetic_data_quality_score']['grade']
+                        print_string = "Training completed for " + table + " with SQS = " + str(sqs) + "(" + grade + ")"
+                        print(print_string)   
+
                     rh = generate_data(table, model, training_data, synth_record_counts)
                     model_progress[table]["record_handler"] = rh
                     model_progress[table]["record_handler_status"] = "pending"

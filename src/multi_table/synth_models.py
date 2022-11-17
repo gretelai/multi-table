@@ -1,5 +1,6 @@
 import random
 import pandas as pd
+import time
 
 from gretel_client import projects
 from gretel_client import create_project
@@ -190,6 +191,7 @@ def synthesize_rdb(rdb_config:dict, project, training_configs:dict):
     more_to_do = True
     no_errors = True
     while more_to_do and no_errors:
+        time.sleep(1)
     
         # Check status of training
         more_to_do = False
@@ -198,7 +200,13 @@ def synthesize_rdb(rdb_config:dict, project, training_configs:dict):
             if (status == 'created') or (status == 'pending') or (status == "active"):
                 more_to_do = True
                 model = model_progress[table]["model"]
-                model._poll_job_endpoint()
+
+                try:
+                    model._poll_job_endpoint()
+                except Exception as err:
+                    print(f"Warning: error polling Gretel API: {str(err)}, skipping this check")
+                    continue
+
                 status = model.__dict__['_data']['model']['status']
             
                 # If status is now complete, submit the generation job
